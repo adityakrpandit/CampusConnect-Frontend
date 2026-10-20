@@ -1854,70 +1854,117 @@ public class DoubtFrame extends JFrame {
     // ASK DOUBT
     // =========================================================
 
+
     private void askDoubt() {
         String subject = subjectField.getText().trim();
         String question = questionArea.getText().trim();
 
         if (subject.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please enter the subject.",
+            JOptionPane.showMessageDialog(
+                    this, "Please enter the subject.",
                     "Missing Subject", JOptionPane.WARNING_MESSAGE);
             subjectField.requestFocus();
             return;
         }
+
         if (question.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please enter your question.",
+            JOptionPane.showMessageDialog(
+                    this, "Please enter your question.",
                     "Missing Question", JOptionPane.WARNING_MESSAGE);
             questionArea.requestFocus();
             return;
         }
+
         if (question.length() < 5) {
-            JOptionPane.showMessageDialog(this,
-                    "Please enter a little more detail about your doubt.",
+            JOptionPane.showMessageDialog(
+                    this, "Please enter a little more detail about your doubt.",
                     "Question Too Short", JOptionPane.WARNING_MESSAGE);
             questionArea.requestFocus();
             return;
         }
+
         if (studentName == null || studentName.trim().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Student details are not loaded yet.",
+            JOptionPane.showMessageDialog(
+                    this, "Student details are not loaded yet.",
                     "Doubts", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        askButton.setEnabled(false);
-        new SwingWorker<Boolean, Void>() {
-            private String errorMessage;
+        // Keep the selected local file path before starting the worker.
+        final String localImagePath = selectedImagePath;
 
+        askButton.setEnabled(false);
+        attachButton.setEnabled(false);
+        removeImageButton.setEnabled(false);
+
+        new SwingWorker<Boolean, Void>() {
             @Override
             protected Boolean doInBackground() throws Exception {
+
+                String cloudImageUrl = null;
+
+                // Step 1: Upload the selected image to Cloudinary.
+                if (localImagePath != null && !localImagePath.trim().isEmpty()) {
+                    File imageFile = new File(localImagePath);
+
+                    if (!imageFile.isFile() || !imageFile.canRead()) {
+                        throw new IOException("The selected image cannot be read.");
+                    }
+
+                    if (imageFile.length() > 10L * 1024 * 1024) {
+                        throw new IOException("Image size must not exceed 10 MB.");
+                    }
+
+                    cloudImageUrl = uploadImageToCloudinary(imageFile);
+                }
+
+                // Step 2: Submit the doubt with the Cloudinary URL.
                 URL url = new URL(API_BASE_URL);
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                System.out.println("Doubt submission URL: " + url);
+                HttpURLConnection connection =
+                        (HttpURLConnection) url.openConnection();
+
                 connection.setRequestMethod("POST");
                 connection.setConnectTimeout(20000);
                 connection.setReadTimeout(30000);
                 connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                connection.setRequestProperty(
+                        "Content-Type", "application/json; charset=UTF-8");
                 connection.setRequestProperty("Accept", "application/json");
-                ObjectNode payload = objectMapper.createObjectNode();
-                payload.put("studentName", studentName.trim());
-                payload.put("subject", subject);
-                payload.put("question", question);
-                if (selectedImagePath == null || selectedImagePath.trim().isEmpty()) {
-                    payload.putNull("imagePath");
-                } else {
-                    payload.put("imagePath", selectedImagePath);
-                }
+
                 try {
+                    ObjectNode payload = objectMapper.createObjectNode();
+                    payload.put("studentName", studentName.trim());
+                    payload.put("subject", subject);
+                    payload.put("question", question);
+
+                    if (cloudImageUrl == null || cloudImageUrl.trim().isEmpty()) {
+                        payload.putNull("imagePath");
+                    } else {
+                        payload.put("imagePath", cloudImageUrl);
+                    }
+
                     try (OutputStream out = connection.getOutputStream()) {
                         out.write(objectMapper.writeValueAsBytes(payload));
                     }
+
                     int code = connection.getResponseCode();
-                    java.io.InputStream stream = code >= 200 && code < 300
-                            ? connection.getInputStream() : connection.getErrorStream();
-                    JsonNode response = objectMapper.readTree(stream);
+                    System.out.println("Doubt submission HTTP status: " + code);
+                    java.io.InputStream stream =
+                            code >= 200 && code < 300
+                                    ? connection.getInputStream()
+                                    : connection.getErrorStream();
+
+                    JsonNode response;
+                    try (java.io.InputStream responseStream = stream) {
+                        response = objectMapper.readTree(responseStream);
+                    }
+
                     if (code < 200 || code >= 300) {
                         throw new IOException(response.path("error").asText(
                                 "Unable to submit doubt (HTTP " + code + ")."));
                     }
+
                     return true;
                 } finally {
                     connection.disconnect();
@@ -1927,11 +1974,17 @@ public class DoubtFrame extends JFrame {
             @Override
             protected void done() {
                 askButton.setEnabled(true);
+                attachButton.setEnabled(true);
+                removeImageButton.setEnabled(true);
+
                 try {
                     if (get()) {
-                        JOptionPane.showMessageDialog(DoubtFrame.this,
+                        JOptionPane.showMessageDialog(
+                                DoubtFrame.this,
                                 "Your doubt has been submitted successfully.",
-                                "Doubt Submitted", JOptionPane.INFORMATION_MESSAGE);
+                                "Doubt Submitted",
+                                JOptionPane.INFORMATION_MESSAGE);
+
                         subjectField.setText("");
                         questionArea.setText("");
                         removeSelectedImage();
@@ -1939,12 +1992,108 @@ public class DoubtFrame extends JFrame {
                     }
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() == null ? ex : ex.getCause();
-                    JOptionPane.showMessageDialog(DoubtFrame.this,
-                            "Error submitting doubt to Render API:\n" + cause.getMessage(),
-                            "Doubts API Error", JOptionPane.ERROR_MESSAGE);
+
+                    JOptionPane.showMessageDialog(
+                            DoubtFrame.this,
+                            "Unable to submit doubt:\n" + cause.getMessage(),
+                            "Doubts API Error",
+                            JOptionPane.ERROR_MESSAGE);
                 }
             }
         }.execute();
+    }
+
+    // =========================================================
+    // CLOUDINARY IMAGE UPLOAD
+    // =========================================================
+
+    private String uploadImageToCloudinary(File imageFile) throws IOException {
+        String boundary = "CampusConnectBoundary" + System.currentTimeMillis();
+        HttpURLConnection connection = null;
+
+        try {
+            URL url = new URL(API_BASE_URL + "/image");
+            System.out.println("Submitting doubt to: " + url);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(20000);
+            connection.setReadTimeout(60000);
+            connection.setDoOutput(true);
+            connection.setRequestProperty(
+                    "Content-Type", "multipart/form-data; boundary=" + boundary);
+            connection.setRequestProperty("Accept", "application/json");
+
+            try (OutputStream out = connection.getOutputStream()) {
+                String lineBreak = "\r\n";
+                String safeFileName = imageFile.getName().replace("\"", "");
+                String contentType = getImageContentType(imageFile);
+                String partHeader =
+                        "--" + boundary + lineBreak
+                                + "Content-Disposition: form-data; name=\"file\"; filename=\""
+                                + safeFileName + "\"" + lineBreak
+                                + "Content-Type: " + contentType + lineBreak
+                                + lineBreak;
+
+                out.write(partHeader.getBytes(StandardCharsets.UTF_8));
+                try (java.io.InputStream fileInput =
+                             new java.io.FileInputStream(imageFile)) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = fileInput.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                }
+                out.write(lineBreak.getBytes(StandardCharsets.UTF_8));
+                out.write(("--" + boundary + "--" + lineBreak)
+                        .getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+
+            int code = connection.getResponseCode();
+            System.out.println("Cloudinary upload endpoint: " + url);
+            System.out.println("Image upload HTTP status: " + code);
+            java.io.InputStream stream = code >= 200 && code < 300
+                    ? connection.getInputStream() : connection.getErrorStream();
+            if (stream == null) {
+                throw new IOException("Image upload failed (HTTP " + code + ").");
+            }
+
+            JsonNode response;
+            try (java.io.InputStream responseStream = stream) {
+                response = objectMapper.readTree(responseStream);
+            }
+
+            if (code < 200 || code >= 300) {
+                String message = response == null ? "" : response.path("error").asText("");
+                if (message.isEmpty() && response != null) {
+                    message = response.path("message").asText("");
+                }
+                throw new IOException(message.isEmpty()
+                        ? "Image upload failed (HTTP " + code + ")." : message);
+            }
+
+            String imageUrl = response == null ? "" : response.path("imageUrl").asText("");
+            if (!imageUrl.startsWith("https://")) {
+                throw new IOException("The server did not return a valid secure image URL.");
+            }
+            return imageUrl;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String getImageContentType(File imageFile) throws IOException {
+        String name = imageFile.getName().toLowerCase(java.util.Locale.ROOT);
+        if (name.endsWith(".png")) return "image/png";
+        if (name.endsWith(".webp")) return "image/webp";
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+        if (name.endsWith(".gif")) return "image/gif";
+
+        String detected = java.nio.file.Files.probeContentType(imageFile.toPath());
+        if (detected != null && detected.startsWith("image/")) return detected;
+        throw new IOException("Unsupported image type. Please select a JPG, JPEG, PNG, WEBP, or GIF image.");
     }
 
     // =========================================================
@@ -2252,154 +2401,64 @@ public class DoubtFrame extends JFrame {
     // OPEN IMAGE
     // =========================================================
 
-    private void openImage(
-            String imagePath
-    ) {
-
-        if (
-                imagePath == null ||
-                        imagePath.trim().isEmpty()
-        ) {
-            return;
-        }
-
-        File imageFile =
-                new File(
-                        imagePath
-                );
-
-        if (
-                !imageFile.exists()
-        ) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "The attached image could not be found.\n\n"
-                            + imagePath,
-                    "Image Not Found",
-                    JOptionPane.WARNING_MESSAGE
-            );
-
+    private void openImage(String imagePath) {
+        if (imagePath == null || imagePath.trim().isEmpty()
+                || "No Image".equalsIgnoreCase(imagePath.trim())
+                || "null".equalsIgnoreCase(imagePath.trim())) {
             return;
         }
 
         try {
-
-            Image image =
-                    ImageIO.read(
-                            imageFile
-                    );
+            Image image;
+            if (imagePath.startsWith("https://") || imagePath.startsWith("http://")) {
+                URL imageUrl = new URL(imagePath);
+                java.net.URLConnection imageConnection = imageUrl.openConnection();
+                imageConnection.setConnectTimeout(15000);
+                imageConnection.setReadTimeout(30000);
+                try (java.io.InputStream input = imageConnection.getInputStream()) {
+                    image = ImageIO.read(input);
+                }
+            } else {
+                File imageFile = new File(imagePath);
+                if (!imageFile.isFile()) {
+                    JOptionPane.showMessageDialog(this,
+                            "The attached image could not be found.\n\n" + imagePath,
+                            "Image Not Found", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                image = ImageIO.read(imageFile);
+            }
 
             if (image == null) {
-
-                JOptionPane.showMessageDialog(
-                        this,
-                        "This file is not a valid image.",
-                        "Invalid Image",
-                        JOptionPane.WARNING_MESSAGE
-                );
-
+                JOptionPane.showMessageDialog(this,
+                        "This file is not a supported image.",
+                        "Invalid Image", JOptionPane.WARNING_MESSAGE);
                 return;
             }
 
-            int originalWidth =
-                    image.getWidth(null);
+            int originalWidth = image.getWidth(null);
+            int originalHeight = image.getHeight(null);
+            int maxWidth = 850;
+            int maxHeight = 600;
+            double scale = Math.min(1.0, Math.min(
+                    (double) maxWidth / originalWidth,
+                    (double) maxHeight / originalHeight));
+            int width = Math.max(1, (int) (originalWidth * scale));
+            int height = Math.max(1, (int) (originalHeight * scale));
+            Image scaled = image.getScaledInstance(width, height, Image.SCALE_SMOOTH);
 
-            int originalHeight =
-                    image.getHeight(null);
+            JLabel imageLabel = new JLabel(new ImageIcon(scaled));
+            imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            JScrollPane scrollPane = new JScrollPane(imageLabel);
+            scrollPane.setPreferredSize(new Dimension(
+                    Math.min(width + 40, 900), Math.min(height + 40, 650)));
 
-            int maxWidth =
-                    850;
-
-            int maxHeight =
-                    600;
-
-            double scale =
-                    Math.min(
-                            (double) maxWidth
-                                    / originalWidth,
-                            (double) maxHeight
-                                    / originalHeight
-                    );
-
-            scale =
-                    Math.min(
-                            scale,
-                            1.0
-                    );
-
-            int width =
-                    Math.max(
-                            1,
-                            (int)
-                                    (
-                                            originalWidth
-                                                    * scale
-                                    )
-                    );
-
-            int height =
-                    Math.max(
-                            1,
-                            (int)
-                                    (
-                                            originalHeight
-                                                    * scale
-                                    )
-                    );
-
-            Image scaled =
-                    image.getScaledInstance(
-                            width,
-                            height,
-                            Image.SCALE_SMOOTH
-                    );
-
-            JLabel imageLabel =
-                    new JLabel(
-                            new ImageIcon(
-                                    scaled
-                            )
-                    );
-
-            imageLabel.setHorizontalAlignment(
-                    SwingConstants.CENTER
-            );
-
-            JScrollPane scrollPane =
-                    new JScrollPane(
-                            imageLabel
-                    );
-
-            scrollPane.setPreferredSize(
-                    new Dimension(
-                            Math.min(
-                                    width + 40,
-                                    900
-                            ),
-                            Math.min(
-                                    height + 40,
-                                    650
-                            )
-                    )
-            );
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    scrollPane,
-                    "Attached Image",
-                    JOptionPane.PLAIN_MESSAGE
-            );
-
+            JOptionPane.showMessageDialog(this, scrollPane,
+                    "Attached Image", JOptionPane.PLAIN_MESSAGE);
         } catch (IOException e) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Unable to open image:\n"
-                            + e.getMessage(),
-                    "Image Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+            JOptionPane.showMessageDialog(this,
+                    "Unable to open image:\n" + e.getMessage(),
+                    "Image Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 

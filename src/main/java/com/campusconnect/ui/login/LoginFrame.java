@@ -952,16 +952,18 @@ public class LoginFrame extends JFrame {
                 );
             }
 
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Could not connect to CampusConnect backend.\n"
-                            + "Make sure the backend is running on port 8080.\n\n"
-                            + e.getMessage(),
-                    "Connection Error",
-                    JOptionPane.ERROR_MESSAGE
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(
+                this,
+                "Could not connect to CampusConnect backend.\n"
+                        + "Please check your internet connection and "
+                        + "make sure the Render backend is available.\n\n"
+                        + "Details: " + e.getMessage(),
+                "Connection Error",
+                JOptionPane.ERROR_MESSAGE
             );
-        } catch (InterruptedException e) {
+
+    } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             JOptionPane.showMessageDialog(
                     this,
