@@ -1,5 +1,7 @@
 package com.campusconnect.ui.student;
 
+import com.campusconnect.api.ApiClient;
+
 import com.campusconnect.config.DatabaseConnection;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1682,62 +1684,63 @@ public class DoubtFrame extends JFrame {
     // LOAD STUDENT
     // =========================================================
 
+
     private void loadStudentName() {
-
-        String sql =
-                "SELECT name FROM students WHERE email = ?";
-
-        try (
-                Connection connection =
-                        DatabaseConnection.getConnection();
-
-                PreparedStatement statement =
-                        connection.prepareStatement(sql)
-        ) {
-
-            statement.setString(
-                    1,
-                    studentEmail
+        if (studentEmail == null || studentEmail.isBlank()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Student email is not available.",
+                    "Student Error",
+                    JOptionPane.ERROR_MESSAGE
             );
+            return;
+        }
 
-            try (
-                    ResultSet rs =
-                            statement.executeQuery()
-            ) {
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                String encodedEmail = java.net.URLEncoder.encode(
+                        studentEmail,
+                        java.nio.charset.StandardCharsets.UTF_8
+                );
 
-                if (rs.next()) {
+                com.fasterxml.jackson.databind.JsonNode profile =
+                        ApiClient.get("/students/profile?email=" + encodedEmail);
 
-                    studentName =
-                            rs.getString("name");
+                String name = ApiClient.text(profile, "name", "studentName");
 
-                    studentLabel.setText(
-                            studentName
+                if (name == null || name.isBlank()) {
+                    throw new java.io.IOException(
+                            "Student name was not found in the profile API response."
                     );
+                }
 
+                return name.trim();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    studentName = get();
+                    studentLabel.setText(studentName);
                     loadDoubts();
-
-                } else {
+                } catch (Exception ex) {
+                    Throwable cause = ex.getCause() == null
+                            ? ex
+                            : ex.getCause();
 
                     JOptionPane.showMessageDialog(
-                            this,
-                            "Student details not found.",
-                            "Student Not Found",
+                            DoubtFrame.this,
+                            "Unable to load student profile:\n"
+                                    + cause.getMessage(),
+                            "Profile API Error",
                             JOptionPane.ERROR_MESSAGE
                     );
                 }
             }
-
-        } catch (SQLException e) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Database Error:\n"
-                            + e.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
-        }
+        }.execute();
     }
+
 
     // =========================================================
     // LOAD DOUBTS
