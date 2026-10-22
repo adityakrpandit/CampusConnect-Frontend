@@ -3,7 +3,8 @@ package com.campusconnect.ui.student;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.basic.BasicButtonUI;
-import com.campusconnect.config.DatabaseConnection;
+import com.campusconnect.api.ApiClient;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -11,10 +12,7 @@ import java.io.File;
 import java.lang.reflect.Constructor;
 import java.net.URL;
 import java.math.BigDecimal;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -190,79 +188,33 @@ public class DashboardFrame extends JFrame {
 
 
     private void loadStudentData() {
-
-        if (userEmail == null || userEmail.trim().isEmpty()) {
-            return;
-        }
-
-        String sql =
-                "SELECT name, course, semester, cgpa, status, profile_photo " +
-                        "FROM students WHERE email = ?";
-
-        try (
-                Connection connection = DatabaseConnection.getConnection();
-                PreparedStatement statement = connection.prepareStatement(sql)
-        ) {
-
-            statement.setString(1, userEmail);
-
-            try (ResultSet resultSet = statement.executeQuery()) {
-
-                if (resultSet.next()) {
-
-                    String databaseName = resultSet.getString("name");
-                    if (databaseName != null && !databaseName.trim().isEmpty()) {
-                        studentName = databaseName.trim();
-                    }
-
-                    String databaseCourse = resultSet.getString("course");
-                    studentCourse = (databaseCourse == null || databaseCourse.trim().isEmpty())
-                            ? "N/A" : databaseCourse.trim();
-
-                    int semesterValue = resultSet.getInt("semester");
-                    studentSemester = resultSet.wasNull()
-                            ? "N/A" : String.valueOf(semesterValue);
-
-                    BigDecimal cgpaValue = resultSet.getBigDecimal("cgpa");
-                    studentCgpa = cgpaValue == null
-                            ? "N/A"
-                            : cgpaValue.setScale(
-                            2,
-                            java.math.RoundingMode.HALF_UP
-                    ).toPlainString();
-
-                    String databaseStatus = resultSet.getString("status");
-                    studentStatus = (databaseStatus == null || databaseStatus.trim().isEmpty())
-                            ? "N/A" : databaseStatus.trim();
-
-                    // Load the logged-in student's profile photo path
-                    studentPhotoPath = resultSet.getString("profile_photo");
-
-                    if (studentPhotoPath != null) {
-                        studentPhotoPath = studentPhotoPath.trim();
-
-                        if (studentPhotoPath.isEmpty()) {
-                            studentPhotoPath = null;
-                        }
-                    }
-
-                } else {
-                    System.err.println(
-                            "No student record found for email: " + userEmail
-                    );
-                }
+        if (userEmail == null || userEmail.isBlank()) return;
+        try {
+            JsonNode profile = ApiClient.get("/students/profile?email=" +
+                    java.net.URLEncoder.encode(userEmail.trim(), java.nio.charset.StandardCharsets.UTF_8));
+            String value = ApiClient.text(profile, "name");
+            if (value != null && !value.isBlank()) studentName = value.trim();
+            value = ApiClient.text(profile, "course");
+            studentCourse = value == null || value.isBlank() ? "N/A" : value.trim();
+            value = ApiClient.text(profile, "semester");
+            studentSemester = value == null || value.isBlank() ? "N/A" : value;
+            value = ApiClient.text(profile, "cgpa");
+            if (value == null || value.isBlank()) {
+                studentCgpa = "N/A";
+            } else {
+                try { studentCgpa = new BigDecimal(value).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString(); }
+                catch (NumberFormatException ignored) { studentCgpa = value; }
             }
-
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-
-            JOptionPane.showMessageDialog(
-                    null,
-                    "Unable to load student academic details from the database.\n"
-                            + ex.getMessage(),
-                    "CampusConnect Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+            value = ApiClient.text(profile, "status");
+            studentStatus = value == null || value.isBlank() ? "N/A" : value.trim();
+            studentPhotoPath = ApiClient.text(profile, "profile_photo", "profilePhoto");
+            if (studentPhotoPath != null && studentPhotoPath.isBlank()) studentPhotoPath = null;
+        } catch (IOException | InterruptedException ex) {
+            if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+            System.err.println("Unable to load student dashboard from backend: " + ex.getMessage());
+            JOptionPane.showMessageDialog(null,
+                    "Unable to load student details from CampusConnect server.\n" + ex.getMessage(),
+                    "Server Connection Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 

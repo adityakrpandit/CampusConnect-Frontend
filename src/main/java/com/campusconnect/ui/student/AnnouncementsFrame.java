@@ -1,22 +1,19 @@
 package com.campusconnect.ui.student;
 
+import com.campusconnect.dao.AnnouncementDAO;
+
 import javax.swing.*;
 import javax.swing.border.AbstractBorder;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.io.IOException;
-import java.time.Duration;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public class AnnouncementsFrame extends JFrame {
+
+    private final AnnouncementDAO announcementDAO = new AnnouncementDAO();
 
     // =====================================================
     // COLORS
@@ -685,227 +682,39 @@ public class AnnouncementsFrame extends JFrame {
     // LOAD ANNOUNCEMENTS
     // =====================================================
 
-
     private void loadAnnouncements(boolean showError) {
+        try {
+            List<com.campusconnect.model.Announcement> loaded =
+                    announcementDAO.getAllAnnouncements();
 
-        String apiUrl =
-                "https://campusconnect-backend-grn0.onrender.com/api/announcements";
+            allAnnouncements.clear();
 
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(20))
-                .build();
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiUrl))
-                .timeout(Duration.ofSeconds(45))
-                .GET()
-                .header("Accept", "application/json")
-                .build();
-
-        if (refreshButton != null) {
-            refreshButton.setEnabled(false);
-        }
-
-        new SwingWorker<List<Announcement>, Void>() {
-
-            private String errorMessage;
-
-            @Override
-            protected List<Announcement> doInBackground()
-                    throws Exception {
-
-                HttpResponse<String> response = client.send(
-                        request,
-                        HttpResponse.BodyHandlers.ofString()
-                );
-
-                if (response.statusCode() != 200) {
-                    throw new IOException(
-                            "API returned HTTP "
-                                    + response.statusCode()
-                                    + "\n"
-                                    + response.body()
-                    );
-                }
-
-                return parseAnnouncements(response.body());
-            }
-
-            @Override
-            protected void done() {
-
-                if (refreshButton != null) {
-                    refreshButton.setEnabled(true);
-                }
-
-                try {
-                    List<Announcement> loaded = get();
-
-                    allAnnouncements.clear();
-                    allAnnouncements.addAll(loaded);
-
-                    totalLabel.setText(
-                            String.valueOf(allAnnouncements.size())
-                    );
-
-                    applySearch();
-
-                    lastUpdatedLabel.setText("Updated just now");
-
-                } catch (Exception e) {
-
-                    Throwable cause = e.getCause();
-
-                    errorMessage = cause != null
-                            ? cause.getMessage()
-                            : e.getMessage();
-
-                    if (showError) {
-                        JOptionPane.showMessageDialog(
-                                AnnouncementsFrame.this,
-                                "Unable to load announcements from the server.\n\n"
-                                        + errorMessage,
-                                "API Error",
-                                JOptionPane.ERROR_MESSAGE
-                        );
-                    }
-                }
-            }
-        }.execute();
-    }
-
-    private List<Announcement> parseAnnouncements(String json)
-            throws IOException {
-
-        List<Announcement> result = new ArrayList<>();
-
-        /*
-         * This parser expects the API's JSON array of objects.
-         * It handles quoted strings and escaped characters.
-         */
-        Pattern objectPattern = Pattern.compile(
-                "\\{((?:[^{}\"]|\"(?:\\\\.|[^\"\\\\])*\")*)\\}"
-        );
-
-        Matcher objectMatcher = objectPattern.matcher(json);
-
-        while (objectMatcher.find()) {
-
-            String object = objectMatcher.group(1);
-
-            String idText = jsonValue(object, "announcementId");
-            String title = jsonValue(object, "title");
-            String message = jsonValue(object, "message");
-            String date = jsonValue(object, "announcementDate");
-
-            if (idText == null || title == null) {
-                continue;
-            }
-
-            try {
-                int id = Integer.parseInt(idText);
-
-                result.add(
+            for (com.campusconnect.model.Announcement item : loaded) {
+                allAnnouncements.add(
                         new Announcement(
-                                id,
-                                title,
-                                message == null ? "" : message,
-                                date == null ? "" : date
+                                item.getAnnouncementId(),
+                                item.getTitle(),
+                                item.getMessage(),
+                                item.getAnnouncementDate()
                         )
                 );
+            }
 
-            } catch (NumberFormatException e) {
-                throw new IOException(
-                        "Invalid announcement ID in API response.",
-                        e
+            totalLabel.setText(String.valueOf(allAnnouncements.size()));
+            applySearch();
+            lastUpdatedLabel.setText("Updated just now");
+
+        } catch (RuntimeException ex) {
+            if (showError) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Unable to load announcements.\n\n" + ex.getMessage(),
+                        "Announcements Error",
+                        JOptionPane.ERROR_MESSAGE
                 );
             }
         }
-
-        if (!json.trim().equals("[]") && result.isEmpty()) {
-            throw new IOException(
-                    "Could not parse the announcements API response."
-            );
-        }
-
-        return result;
     }
-
-    private String jsonValue(String object, String key) {
-
-        Pattern valuePattern = Pattern.compile(
-                "\"" + Pattern.quote(key)
-                        + "\"\\s*:\\s*(null|\"(?:\\\\.|[^\"\\\\])*\"|-?\\d+)"
-        );
-
-        Matcher matcher = valuePattern.matcher(object);
-
-        if (!matcher.find()) {
-            return null;
-        }
-
-        String value = matcher.group(1);
-
-        if ("null".equals(value)) {
-            return null;
-        }
-
-        if (value.startsWith("\"") && value.endsWith("\"")) {
-            return unescapeJson(value.substring(1, value.length() - 1));
-        }
-
-        return value;
-    }
-
-    private String unescapeJson(String value) {
-
-        StringBuilder result = new StringBuilder();
-
-        for (int i = 0; i < value.length(); i++) {
-
-            char c = value.charAt(i);
-
-            if (c != '\\' || i + 1 >= value.length()) {
-                result.append(c);
-                continue;
-            }
-
-            char next = value.charAt(++i);
-
-            switch (next) {
-                case '"' -> result.append('"');
-                case '\\' -> result.append('\\');
-                case '/' -> result.append('/');
-                case 'b' -> result.append('\b');
-                case 'f' -> result.append('\f');
-                case 'n' -> result.append('\n');
-                case 'r' -> result.append('\r');
-                case 't' -> result.append('\t');
-
-                case 'u' -> {
-                    if (i + 4 >= value.length()) {
-                        result.append("\\u");
-                        break;
-                    }
-
-                    String hex = value.substring(i + 1, i + 5);
-
-                    try {
-                        result.append((char) Integer.parseInt(hex, 16));
-                        i += 4;
-                    } catch (NumberFormatException e) {
-                        result.append("\\u").append(hex);
-                        i += 4;
-                    }
-                }
-
-                default -> result.append(next);
-            }
-        }
-
-        return result.toString();
-    }
-
 
     // =====================================================
     // SEARCH

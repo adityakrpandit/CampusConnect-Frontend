@@ -1,14 +1,14 @@
 package com.campusconnect.ui.student;
 
-import com.campusconnect.config.DatabaseConnection;
+import com.campusconnect.api.ApiClient;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class EditStudentProfileFrame extends JFrame {
 
@@ -949,145 +949,25 @@ public class EditStudentProfileFrame extends JFrame {
     // =====================================================
 
     private void loadStudentData() {
-
-        String sql =
-                "SELECT name, email, course, semester, " +
-                        "phone, enrollment_no, profile_photo, " +
-                        "bio, skills_summary, github_url, linkedin_url " +
-                        "FROM students " +
-                        "WHERE email = ?";
-
-        try (
-                Connection connection =
-                        DatabaseConnection.getConnection();
-
-                PreparedStatement statement =
-                        connection.prepareStatement(
-                                sql
-                        )
-        ) {
-
-            statement.setString(
-                    1,
-                    studentEmail
-            );
-
-            try (
-                    ResultSet resultSet =
-                            statement.executeQuery()
-            ) {
-
-                if (resultSet.next()) {
-
-                    nameField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "name"
-                                    )
-                            )
-                    );
-
-                    emailField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "email"
-                                    )
-                            )
-                    );
-
-                    courseField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "course"
-                                    )
-                            )
-                    );
-
-                    int semester =
-                            resultSet.getInt(
-                                    "semester"
-                            );
-
-                    if (resultSet.wasNull()) {
-
-                        semesterField.setText("");
-
-                    } else {
-
-                        semesterField.setText(
-                                String.valueOf(
-                                        semester
-                                )
-                        );
-                    }
-
-                    enrollmentField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "enrollment_no"
-                                    )
-                            )
-                    );
-
-                    phoneField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "phone"
-                                    )
-                            )
-                    );
-
-                    profilePhotoField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "profile_photo"
-                                    )
-                            )
-                    );
-
-                    bioArea.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "bio"
-                                    )
-                            )
-                    );
-
-                    skillsArea.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "skills_summary"
-                                    )
-                            )
-                    );
-
-                    githubField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "github_url"
-                                    )
-                            )
-                    );
-
-                    linkedinField.setText(
-                            safeValue(
-                                    resultSet.getString(
-                                            "linkedin_url"
-                                    )
-                            )
-                    );
-                }
-            }
-
-        } catch (SQLException e) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Database Error:\n"
-                            + e.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+        if (studentEmail == null || studentEmail.isBlank()) return;
+        try {
+            JsonNode data = ApiClient.get("/students/profile?email=" +
+                    java.net.URLEncoder.encode(studentEmail.trim(), java.nio.charset.StandardCharsets.UTF_8));
+            nameField.setText(safeValue(ApiClient.text(data, "name")));
+            emailField.setText(safeValue(ApiClient.text(data, "email")));
+            courseField.setText(safeValue(ApiClient.text(data, "course")));
+            semesterField.setText(safeValue(ApiClient.text(data, "semester")));
+            enrollmentField.setText(safeValue(ApiClient.text(data, "enrollment_no", "enrollmentNo")));
+            phoneField.setText(safeValue(ApiClient.text(data, "phone")));
+            profilePhotoField.setText(safeValue(ApiClient.text(data, "profile_photo", "profilePhoto")));
+            bioArea.setText(safeValue(ApiClient.text(data, "bio")));
+            skillsArea.setText(safeValue(ApiClient.text(data, "skills_summary", "skillsSummary")));
+            githubField.setText(safeValue(ApiClient.text(data, "github_url", "githubUrl")));
+            linkedinField.setText(safeValue(ApiClient.text(data, "linkedin_url", "linkedinUrl")));
+        } catch (IOException | InterruptedException ex) {
+            if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+            JOptionPane.showMessageDialog(this, "Unable to load profile from CampusConnect server.\n" + ex.getMessage(),
+                    "Server Connection Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -1141,171 +1021,36 @@ public class EditStudentProfileFrame extends JFrame {
     // =====================================================
 
     private void saveProfile() {
-
-        String enrollment =
-                enrollmentField
-                        .getText()
-                        .trim();
-
-        String phone =
-                phoneField
-                        .getText()
-                        .trim();
-
-        String photo =
-                profilePhotoField
-                        .getText()
-                        .trim();
-
-        String bio =
-                bioArea
-                        .getText()
-                        .trim();
-
-        String skills =
-                skillsArea
-                        .getText()
-                        .trim();
-
-        String github =
-                githubField
-                        .getText()
-                        .trim();
-
-        String linkedin =
-                linkedinField
-                        .getText()
-                        .trim();
-
-        // =================================================
-        // VALIDATION
-        // =================================================
-
-        if (
-                enrollment.length() > 50
-                        ||
-                        phone.length() > 20
-                        ||
-                        photo.length() > 255
-                        ||
-                        bio.length() > 500
-                        ||
-                        skills.length() > 500
-                        ||
-                        github.length() > 255
-                        ||
-                        linkedin.length() > 255
-        ) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Some information is too long.\n" +
-                            "Please check the field limits.",
-                    "Invalid Information",
-                    JOptionPane.WARNING_MESSAGE
-            );
-
+        String enrollment = enrollmentField.getText().trim();
+        String phone = phoneField.getText().trim();
+        String photo = profilePhotoField.getText().trim();
+        String bio = bioArea.getText().trim();
+        String skills = skillsArea.getText().trim();
+        String github = githubField.getText().trim();
+        String linkedin = linkedinField.getText().trim();
+        if (enrollment.length() > 50 || phone.length() > 20 || photo.length() > 255 ||
+                bio.length() > 500 || skills.length() > 500 || github.length() > 255 || linkedin.length() > 255) {
+            JOptionPane.showMessageDialog(this, "Some information is too long.\nPlease check the field limits.",
+                    "Invalid Information", JOptionPane.WARNING_MESSAGE);
             return;
         }
-
-        // =================================================
-        // UPDATE QUERY
-        // =================================================
-
-        String sql =
-                "UPDATE students SET " +
-                        "enrollment_no = ?, " +
-                        "phone = ?, " +
-                        "profile_photo = ?, " +
-                        "bio = ?, " +
-                        "skills_summary = ?, " +
-                        "github_url = ?, " +
-                        "linkedin_url = ? " +
-                        "WHERE email = ?";
-
-        try (
-                Connection connection =
-                        DatabaseConnection.getConnection();
-
-                PreparedStatement statement =
-                        connection.prepareStatement(
-                                sql
-                        )
-        ) {
-
-            statement.setString(
-                    1,
-                    emptyToNull(enrollment)
-            );
-
-            statement.setString(
-                    2,
-                    emptyToNull(phone)
-            );
-
-            statement.setString(
-                    3,
-                    emptyToNull(photo)
-            );
-
-            statement.setString(
-                    4,
-                    emptyToNull(bio)
-            );
-
-            statement.setString(
-                    5,
-                    emptyToNull(skills)
-            );
-
-            statement.setString(
-                    6,
-                    emptyToNull(github)
-            );
-
-            statement.setString(
-                    7,
-                    emptyToNull(linkedin)
-            );
-
-            statement.setString(
-                    8,
-                    studentEmail
-            );
-
-            int rowsUpdated =
-                    statement.executeUpdate();
-
-            if (rowsUpdated > 0) {
-
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Profile updated successfully!",
-                        "Success",
-                        JOptionPane.INFORMATION_MESSAGE
-                );
-
-                dispose();
-
-            } else {
-
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Profile could not be updated.",
-                        "Update Failed",
-                        JOptionPane.WARNING_MESSAGE
-                );
-            }
-
-        } catch (SQLException e) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Database Error:\n"
-                            + e.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("email", studentEmail);
+        payload.put("enrollmentNo", emptyToNull(enrollment));
+        payload.put("phone", emptyToNull(phone));
+        payload.put("profilePhoto", emptyToNull(photo));
+        payload.put("bio", emptyToNull(bio));
+        payload.put("skillsSummary", emptyToNull(skills));
+        payload.put("githubUrl", emptyToNull(github));
+        payload.put("linkedinUrl", emptyToNull(linkedin));
+        try {
+            ApiClient.post("/students/profile", payload);
+            JOptionPane.showMessageDialog(this, "Profile updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            dispose();
+        } catch (IOException | InterruptedException ex) {
+            if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+            JOptionPane.showMessageDialog(this, "Profile could not be updated.\n" + ex.getMessage(),
+                    "Update Failed", JOptionPane.ERROR_MESSAGE);
         }
     }
 

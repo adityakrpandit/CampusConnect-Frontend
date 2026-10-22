@@ -1757,7 +1757,12 @@ public class DoubtFrame extends JFrame {
 
             @Override
             protected List<JsonNode> doInBackground() throws Exception {
-                String encodedName = URLEncoder.encode(studentName, StandardCharsets.UTF_8.name());
+
+                String encodedName = URLEncoder.encode(
+                        studentName.trim(),
+                        StandardCharsets.UTF_8.name()
+                ).replace("+", "%20");
+
                 URL url = new URL(API_BASE_URL + "/student/" + encodedName);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("GET");

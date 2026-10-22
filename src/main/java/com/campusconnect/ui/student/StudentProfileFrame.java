@@ -1,7 +1,7 @@
-
 package com.campusconnect.ui.student;
 
-import com.campusconnect.config.DatabaseConnection;
+import com.campusconnect.api.ApiClient;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -12,11 +12,10 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.net.URI;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.text.SimpleDateFormat;
 
 /**
@@ -2396,202 +2395,44 @@ public class StudentProfileFrame extends JFrame {
     // =====================================================
 
     private void loadStudentData() {
-
-        /*
-         * We are using the logged-in student's email.
-         *
-         * Therefore:
-         *
-         * Student A -> Student A profile
-         * Student B -> Student B profile
-         * Student C -> Student C profile
-         *
-         * No hard-coded student details.
-         */
-
-        String sql =
-                "SELECT " +
-                        "student_id, " +
-                        "name, " +
-                        "email, " +
-                        "course, " +
-                        "semester, " +
-                        "phone, " +
-                        "enrollment_no, " +
-                        "profile_photo, " +
-                        "bio, " +
-                        "skills_summary, " +
-                        "github_url, " +
-                        "linkedin_url, " +
-                        "created_at " +
-                        "FROM students " +
-                        "WHERE email = ?";
-
-        try (
-                Connection connection =
-                        DatabaseConnection.getConnection();
-
-                PreparedStatement statement =
-                        connection.prepareStatement(
-                                sql
-                        )
-        ) {
-
-            statement.setString(
-                    1,
-                    studentEmail
-            );
-
-            try (
-                    ResultSet resultSet =
-                            statement.executeQuery()
-            ) {
-
-                if (resultSet.next()) {
-
-                    // =====================================
-                    // GET DATA
-                    // =====================================
-
-                    loadedName =
-                            safeString(
-                                    resultSet.getString(
-                                            "name"
-                                    )
-                            );
-
-                    loadedEmail =
-                            safeString(
-                                    resultSet.getString(
-                                            "email"
-                                    )
-                            );
-
-                    loadedCourse =
-                            safeString(
-                                    resultSet.getString(
-                                            "course"
-                                    )
-                            );
-
-                    loadedPhone =
-                            safeString(
-                                    resultSet.getString(
-                                            "phone"
-                                    )
-                            );
-
-                    loadedEnrollment =
-                            safeString(
-                                    resultSet.getString(
-                                            "enrollment_no"
-                                    )
-                            );
-
-                    loadedPhoto =
-                            safeString(
-                                    resultSet.getString(
-                                            "profile_photo"
-                                    )
-                            );
-
-                    loadedBio =
-                            safeString(
-                                    resultSet.getString(
-                                            "bio"
-                                    )
-                            );
-
-                    loadedSkills =
-                            safeString(
-                                    resultSet.getString(
-                                            "skills_summary"
-                                    )
-                            );
-
-                    loadedGithub =
-                            safeString(
-                                    resultSet.getString(
-                                            "github_url"
-                                    )
-                            );
-
-                    loadedLinkedin =
-                            safeString(
-                                    resultSet.getString(
-                                            "linkedin_url"
-                                    )
-                            );
-
-                    // =====================================
-                    // SEMESTER
-                    // =====================================
-
-                    Object semesterObject =
-                            resultSet.getObject(
-                                    "semester"
-                            );
-
-                    if (
-                            semesterObject != null
-                    ) {
-
-                        loadedSemester =
-                                String.valueOf(
-                                        semesterObject
-                                );
-
+        if (studentEmail == null || studentEmail.isBlank()) {
+            showStudentNotFound();
+            return;
+        }
+        try {
+            JsonNode data = ApiClient.get("/students/profile?email=" +
+                    java.net.URLEncoder.encode(studentEmail.trim(), java.nio.charset.StandardCharsets.UTF_8));
+            loadedName = safeString(ApiClient.text(data, "name"));
+            loadedEmail = safeString(ApiClient.text(data, "email"));
+            loadedCourse = safeString(ApiClient.text(data, "course"));
+            loadedPhone = safeString(ApiClient.text(data, "phone"));
+            loadedEnrollment = safeString(ApiClient.text(data, "enrollment_no", "enrollmentNo"));
+            loadedPhoto = safeString(ApiClient.text(data, "profile_photo", "profilePhoto"));
+            loadedBio = safeString(ApiClient.text(data, "bio"));
+            loadedSkills = safeString(ApiClient.text(data, "skills_summary", "skillsSummary"));
+            loadedGithub = safeString(ApiClient.text(data, "github_url", "githubUrl"));
+            loadedLinkedin = safeString(ApiClient.text(data, "linkedin_url", "linkedinUrl"));
+            String semester = ApiClient.text(data, "semester");
+            loadedSemester = semester == null || semester.isBlank() ? "Not available" : semester;
+            JsonNode created = data.get("created_at");
+            if (created == null) created = data.get("createdAt");
+            loadedCreatedAt = "Not available";
+            if (created != null && !created.isNull()) {
+                try {
+                    if (created.isNumber()) {
+                        loadedCreatedAt = new SimpleDateFormat("dd MMM yyyy").format(new java.util.Date(created.asLong()));
                     } else {
-
-                        loadedSemester =
-                                "Not available";
+                        String raw = created.asText();
+                        loadedCreatedAt = raw.length() >= 10 ? raw.substring(0, 10) : raw;
                     }
-
-                    // =====================================
-                    // CREATED DATE
-                    // =====================================
-
-                    Timestamp createdAt =
-                            resultSet.getTimestamp(
-                                    "created_at"
-                            );
-
-                    if (createdAt != null) {
-
-                        loadedCreatedAt =
-                                new SimpleDateFormat(
-                                        "dd MMM yyyy"
-                                ).format(
-                                        createdAt
-                                );
-
-                    } else {
-
-                        loadedCreatedAt =
-                                "Not available";
-                    }
-
-                    // =====================================
-                    // UPDATE UI
-                    // =====================================
-
-                    updateUIWithStudentData();
-
-                } else {
-
-                    showStudentNotFound();
-                }
+                } catch (Exception ignored) { }
             }
-
-        } catch (SQLException e) {
-
-            JOptionPane.showMessageDialog(
-                    this,
-                    "Database Error:\n"
-                            + e.getMessage(),
-                    "Database Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+            updateUIWithStudentData();
+        } catch (IOException | InterruptedException ex) {
+            if (ex instanceof InterruptedException) Thread.currentThread().interrupt();
+            JOptionPane.showMessageDialog(this, "Unable to load profile from CampusConnect server.\n" + ex.getMessage(),
+                    "Server Connection Error", JOptionPane.ERROR_MESSAGE);
+            showStudentNotFound();
         }
     }
 
